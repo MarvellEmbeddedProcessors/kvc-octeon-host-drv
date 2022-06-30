@@ -1,0 +1,40 @@
+ARG IMAGE=registry.access.redhat.com/ubi8/ubi
+
+FROM $IMAGE
+WORKDIR /build/
+
+# Expecting path to pcie_ep tar bz2 from release/sources containing the drivers/host path structure
+ARG DRIVER_SOURCES_WGET_TAR_BZ2_PATH
+
+RUN yum -y install git make sudo gcc bzip2 bc net-tools && yum clean all && rm -rf /var/cache/dnf
+
+# Grab the software from path:
+RUN echo "DRIVER_SOURCES_WGET_TAR_BZ2_PATH: $DRIVER_SOURCES_WGET_TAR_BZ2_PATH"
+RUN wget -O pcie_ep.tar.bz2 $DRIVER_SOURCES_WGET_TAR_BZ2_PATH
+RUN mkdir drivers && tar -xf pcie_ep.tar.bz2 -C ./drivers/
+RUN cd drivers/ && mv * pcie_ep_octeontx && cd pcie_ep_octeontx/host/ && make && make COMPILEFOR=OCTEON_VF
+
+# Create soft-links for the .kos
+# RUN ln -nfs drivers/pcie_ep_octeontx/host/drivers/legacy/modules/driver/src/host/linux/kernel/drv/octeon_drv.ko octeon_drv.ko
+# RUN ln -nfs drivers/pcie_ep_octeontx/host/drivers/legacy/modules/driver/src/host/linux/kernel/drv/octvf/octeon_vf_drv.ko octeon_vf_drv.ko
+# RUN ln -nfs drivers/pcie_ep_octeontx/host/drivers/legacy/modules/driver/src/host/linux/kernel/drv/octnic/octnic.ko octnic.ko
+# RUN ln -nfs drivers/pcie_ep_octeontx/host/drivers/legacy/modules/driver/src/host/linux/kernel/drv/octnic/oct_vf_nic.ko oct_vf_nic.ko
+
+ARG COMMON_PATH=drivers/pcie_ep_octeontx/host/drivers/legacy/modules/driver/src/host/linux/kernel/drv
+
+RUN ln -nfs $COMMON_PATH/octeon_drv.ko octeon_drv.ko
+RUN ln -nfs $COMMON_PATH/octvf/octeon_vf_drv.ko octeon_vf_drv.ko
+RUN ln -nfs $COMMON_PATH/octnic/octnic.ko octnic.ko
+RUN ln -nfs $COMMON_PATH/octnic/oct_vf_nic.ko oct_vf_nic.ko
+
+# Add the helper tools
+WORKDIR /root/kvc-octeon-host-drv
+ADD Makefile .
+ADD octeon-host-drv-lib.sh .
+ADD octeon-host-drv-wrapper.sh .
+ADD octeon-host-drv.conf .
+RUN mkdir -p /usr/lib/kvc/
+RUN mkdir -p /etc/kvc/
+RUN make install
+
+RUN systemctl enable kmods-via-containers@octeon-host-drv
